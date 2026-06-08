@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SuperInstance Conservation Gauge — Live Fleet Budget</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; color: #e0e0e0; font-family: 'SF Mono', 'Fira Code', monospace; overflow-x: hidden; }
+.header { text-align: center; padding: 20px; border-bottom: 1px solid #1a1a3a; }
+.header h1 { font-size: 1.4em; color: #00ff88; }
+.header p { color: #888; font-size: 0.8em; margin-top: 5px; }
+.conservation-law { text-align: center; padding: 15px; font-size: 1.2em; color: #ffcc00; letter-spacing: 2px; }
+.fleet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; padding: 20px; max-width: 1400px; margin: 0 auto; }
+.agent-card { background: #111128; border: 1px solid #1a1a3a; border-radius: 8px; padding: 15px; position: relative; overflow: hidden; }
+.agent-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+.agent-card.healthy::before { background: #00ff88; }
+.agent-card.warning::before { background: #ffcc00; }
+.agent-card.critical::before { background: #ff4444; }
+.agent-name { font-size: 1em; font-weight: bold; margin-bottom: 8px; }
+.agent-role { font-size: 0.75em; color: #888; margin-bottom: 10px; }
+.gauge-bar { height: 20px; background: #1a1a2a; border-radius: 10px; overflow: hidden; margin: 5px 0; position: relative; }
+.gauge-gamma { height: 100%; background: linear-gradient(90deg, #0066ff, #00ff88); transition: width 1s ease; border-radius: 10px 0 0 10px; float: left; }
+.gauge-eta { height: 100%; background: linear-gradient(90deg, #ffcc00, #ff4444); transition: width 1s ease; float: left; }
+.stats { display: flex; justify-content: space-between; font-size: 0.75em; margin-top: 8px; color: #aaa; }
+.stat-val { color: #fff; }
+.fleet-summary { text-align: center; padding: 20px; border-top: 1px solid #1a1a3a; }
+.fleet-bar { height: 30px; background: #1a1a2a; border-radius: 15px; overflow: hidden; margin: 10px auto; max-width: 800px; }
+.fleet-gamma { height: 100%; background: linear-gradient(90deg, #0066ff, #00ff88); float: left; transition: width 1s ease; display: flex; align-items: center; justify-content: center; font-size: 0.8em; color: #000; font-weight: bold; }
+.fleet-eta { height: 100%; background: linear-gradient(90deg, #ffcc00, #ff4444); float: left; transition: width 1s ease; display: flex; align-items: center; justify-content: center; font-size: 0.8em; color: #000; font-weight: bold; }
+.fleet-stats { display: flex; justify-content: center; gap: 40px; margin-top: 15px; font-size: 0.9em; }
+.fleet-stats div { text-align: center; }
+.fleet-stats .num { font-size: 1.4em; font-weight: bold; display: block; }
+.fleet-stats .gamma .num { color: #00ff88; }
+.fleet-stats .eta .num { color: #ffcc00; }
+.fleet-stats .total .num { color: #ff6688; }
+.timeline { padding: 20px; max-width: 1000px; margin: 0 auto; }
+.timeline h3 { color: #00ff88; margin-bottom: 10px; font-size: 0.9em; }
+.timeline-canvas { width: 100%; height: 120px; background: #111128; border-radius: 8px; border: 1px solid #1a1a3a; }
+.legend { display: flex; justify-content: center; gap: 20px; padding: 10px; font-size: 0.75em; color: #888; }
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.legend-color { width: 12px; height: 12px; border-radius: 3px; }
+.refresh-btn { background: #1a1a3a; color: #00ff88; border: 1px solid #00ff88; padding: 8px 20px; border-radius: 5px; cursor: pointer; font-family: inherit; font-size: 0.8em; margin: 10px; }
+.refresh-btn:hover { background: #00ff88; color: #000; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>⚡ SuperInstance Conservation Gauge</h1>
+  <p>Real-time fleet budget visualization</p>
+</div>
+
+<div class="conservation-law">
+  γ + η = C &nbsp;&nbsp;|&nbsp;&nbsp; gamma + eta = total_budget
+</div>
+
+<button class="refresh-btn" onclick="tick()">⟳ Simulate Tick</button>
+<span id="tick-count" style="color:#888;font-size:0.8em;">Tick: 0</span>
+
+<div class="fleet-summary">
+  <div class="fleet-bar">
+    <div class="fleet-gamma" id="fleet-gamma" style="width:60%">γ 60%</div>
+    <div class="fleet-eta" id="fleet-eta" style="width:40%">η 40%</div>
+  </div>
+  <div class="fleet-stats">
+    <div class="gamma"><span class="num" id="fleet-gamma-val">0</span>γ (durable)</div>
+    <div class="eta"><span class="num" id="fleet-eta-val">0</span>η (ephemeral)</div>
+    <div class="total"><span class="num" id="fleet-total-val">0</span>Total Budget</div>
+  </div>
+</div>
+
+<div class="fleet-grid" id="agent-grid"></div>
+
+<div class="timeline">
+  <h3>📈 Budget History</h3>
+  <canvas class="timeline-canvas" id="timeline-canvas" width="1000" height="120"></canvas>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-color" style="background:#00ff88"></div> γ (durable)</div>
+    <div class="legend-item"><div class="legend-color" style="background:#ffcc00"></div> η (ephemeral)</div>
+    <div class="legend-item"><div class="legend-color" style="background:#ff4444"></div> Exhausted</div>
+  </div>
+</div>
+
+<script>
+const AGENTS = [
+  { name: "Forgemaster", role: "Crate Factory", total: 50000, gamma: 32000, eta: 18000 },
+  { name: "Oracle", role: "Strategist", total: 80000, gamma: 55000, eta: 25000 },
+  { name: "Fleet Warden", role: "Health Monitor", total: 30000, gamma: 18000, eta: 12000 },
+  { name: "si-scanner", role: "Discovery", total: 20000, gamma: 14000, eta: 6000 },
+  { name: "si-catalog", role: "Cataloging", total: 25000, gamma: 16000, eta: 9000 },
+  { name: "si-validator", role: "Validation", total: 15000, gamma: 11000, eta: 4000 },
+  { name: "si-bench", role: "Benchmarking", total: 18000, gamma: 13000, eta: 5000 },
+  { name: "Agent Homeostasis", role: "Self-Regulation", total: 40000, gamma: 28000, eta: 12000 },
+  { name: "Spectral Fleet", role: "Analysis", total: 35000, gamma: 22000, eta: 13000 },
+  { name: "Constraint Dynamics", role: "CSP Solver", total: 45000, gamma: 30000, eta: 15000 },
+  { name: "ga-core", role: "Geometric Algebra", total: 60000, gamma: 42000, eta: 18000 },
+  { name: "symplectic-opt", role: "Hamiltonian Systems", total: 55000, gamma: 38000, eta: 17000 },
+];
+
+let tickCount = 0;
+const history = [];
+
+function spend(agent, amount) {
+  // Spend from eta first, then gamma
+  if (agent.eta >= amount) {
+    agent.eta -= amount;
+  } else {
+    let remaining = amount - agent.eta;
+    agent.eta = 0;
+    agent.gamma -= remaining;
+  }
+  agent.gamma = Math.max(0, agent.gamma);
+}
+
+function replenish(agent, amount) {
+  // Replenish gamma first
+  let gammaSpace = agent.total - agent.eta - agent.gamma;
+  let gammaAdd = Math.min(amount, gammaSpace);
+  agent.gamma += gammaAdd;
+  agent.eta = agent.total - agent.gamma;
+}
+
+function getStatus(agent) {
+  const utilization = agent.gamma / agent.total;
+  if (utilization > 0.3) return "healthy";
+  if (utilization > 0.1) return "warning";
+  return "critical";
+}
+
+function renderAgents() {
+  const grid = document.getElementById("agent-grid");
+  grid.innerHTML = "";
+  
+  let fleetGamma = 0, fleetEta = 0, fleetTotal = 0;
+  
+  AGENTS.forEach(agent => {
+    const status = getStatus(agent);
+    const gammaPct = (agent.gamma / agent.total * 100).toFixed(1);
+    const etaPct = (agent.eta / agent.total * 100).toFixed(1);
+    const utilization = (agent.gamma / agent.total * 100).toFixed(0);
+    
+    fleetGamma += agent.gamma;
+    fleetEta += agent.eta;
+    fleetTotal += agent.total;
+    
+    const card = document.createElement("div");
+    card.className = `agent-card ${status}`;
+    card.innerHTML = `
+      <div class="agent-name">${agent.name}</div>
+      <div class="agent-role">${agent.role}</div>
+      <div class="gauge-bar">
+        <div class="gauge-gamma" style="width:${gammaPct}%"></div>
+        <div class="gauge-eta" style="width:${etaPct}%"></div>
+      </div>
+      <div class="stats">
+        <span>γ <span class="stat-val">${(agent.gamma/1000).toFixed(1)}K</span></span>
+        <span>η <span class="stat-val">${(agent.eta/1000).toFixed(1)}K</span></span>
+        <span>Util <span class="stat-val">${utilization}%</span></span>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+  
+  // Update fleet summary
+  const fgPct = (fleetGamma / fleetTotal * 100).toFixed(1);
+  const fePct = (fleetEta / fleetTotal * 100).toFixed(1);
+  document.getElementById("fleet-gamma").style.width = fgPct + "%";
+  document.getElementById("fleet-eta").style.width = fePct + "%";
+  document.getElementById("fleet-gamma").textContent = `γ ${fgPct}%`;
+  document.getElementById("fleet-eta").textContent = `η ${fePct}%`;
+  document.getElementById("fleet-gamma-val").textContent = (fleetGamma/1000).toFixed(0) + "K";
+  document.getElementById("fleet-eta-val").textContent = (fleetEta/1000).toFixed(0) + "K";
+  document.getElementById("fleet-total-val").textContent = (fleetTotal/1000).toFixed(0) + "K";
+  
+  // Record history
+  history.push({ tick: tickCount, gamma: fleetGamma, eta: fleetEta, total: fleetTotal });
+  if (history.length > 60) history.shift();
+  drawTimeline();
+}
+
+function drawTimeline() {
+  const canvas = document.getElementById("timeline-canvas");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  
+  if (history.length < 2) return;
+  
+  const maxVal = history[0].total;
+  
+  // Draw gamma area
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  history.forEach((pt, i) => {
+    const x = (i / (history.length - 1)) * w;
+    const y = h - (pt.gamma / maxVal) * h;
+    ctx.lineTo(x, y);
+  });
+  ctx.lineTo(w, h);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(0, 255, 136, 0.15)";
+  ctx.fill();
+  
+  // Draw gamma line
+  ctx.beginPath();
+  history.forEach((pt, i) => {
+    const x = (i / (history.length - 1)) * w;
+    const y = h - (pt.gamma / maxVal) * h;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#00ff88";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  
+  // Draw eta line
+  ctx.beginPath();
+  history.forEach((pt, i) => {
+    const x = (i / (history.length - 1)) * w;
+    const y = h - (pt.eta / maxVal) * h;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#ffcc00";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  
+  // Draw total line (should be constant = conservation)
+  ctx.beginPath();
+  history.forEach((pt, i) => {
+    const x = (i / (history.length - 1)) * w;
+    const y = h - (pt.total / maxVal) * h;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#ff6688";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function tick() {
+  tickCount++;
+  document.getElementById("tick-count").textContent = `Tick: ${tickCount}`;
+  
+  AGENTS.forEach(agent => {
+    // Random spending
+    const spendAmount = Math.random() * agent.total * 0.05;
+    spend(agent, spendAmount);
+    
+    // Random replenishment (agents recovering)
+    if (Math.random() > 0.7) {
+      const replenishAmount = Math.random() * agent.total * 0.08;
+      replenish(agent, replenishAmount);
+    }
+  });
+  
+  renderAgents();
+}
+
+// Initial render
+renderAgents();
+
+// Auto-tick every 2 seconds
+setInterval(tick, 2000);
+</script>
+
+</body>
+</html>
